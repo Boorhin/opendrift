@@ -112,7 +112,7 @@ def write_buffer(self):
     dask.array.
     """
 
-    self.buffer_ds = xr.Dataset()
+    # self.buffer_ds = xr.Dataset()
     num_steps_to_export = self.steps_output - self.steps_exported
     slice = slice(self.steps_exported, self.steps_output+1)
     for prop in self.history_metadata:
