@@ -34,7 +34,7 @@ def init(self, filename, engine="zarr"):
                     "method not recognised"
     assert engine == 'zarr', '{} engine not yet supported'.format(engine)
     # save it for the import statement
-    self.engine= engine
+
 
     self.outfile_name = filename
     self.ds = xr.Dataset(
@@ -86,8 +86,6 @@ def init(self, filename, engine="zarr"):
     for prop in self.history.dtype.fields:
         if prop in skip_parameters:
             continue
-        # Note: Should use 'f8' if 'f4' is not accurate enough,
-        #       at expense of larger files
         try:
             dtype = self.history.dtype[prop]
         except:
@@ -107,7 +105,7 @@ def init(self, filename, engine="zarr"):
                 self.ds[prop].attrs[subprop[0]]= subprop[1]
 
     # writing all the metadata without computing any array value
-    self.ds.to_zarr(self.outfile_name, , compute=False)
+    self.ds.to_zarr(self.outfile_name, engine=self.engine, compute=False)
 
 def write_buffer(self):
     """

@@ -134,6 +134,7 @@ class OpenDriftSimulation(PhysicsMethods, Timeable):
     def __init__(self,
                  seed=0,
                  iomodule='netcdf',
+                 engine='zarr'
                  loglevel=logging.DEBUG,
                  logtime='%H:%M:%S',
                  logfile=None):
@@ -150,6 +151,8 @@ class OpenDriftSimulation(PhysicsMethods, Timeable):
             iomodule: name of module used to export data
                 default: netcdf, see :py:mod:`opendrift.io` for more alternatives.
                 `iomodule` is module/filename without preceeding `io_`
+            engine: name of the engine used to write files
+                default: zarr, netcdf is possible too.
             loglevel: set to 0 (default) to retrieve all debug information.
                 Provide a higher value (e.g. 20) to receive less output.
                 Use the string 'custom' to configure logging from outside.
@@ -245,6 +248,8 @@ class OpenDriftSimulation(PhysicsMethods, Timeable):
         self.io_import_file = types.MethodType(io_module.import_file, self)
         self.io_import_file_xarray = types.MethodType(
             io_module.import_file_xarray, self)
+        # parameters for xarray could add chunk too?
+        self.engine=engine
 
         # Set configuration options
         self._add_config({
