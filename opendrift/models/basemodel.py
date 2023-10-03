@@ -25,7 +25,7 @@ import logging
 logging.captureWarnings(True)
 logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta
-from collections import OrderedDict
+#from collections import OrderedDict
 from abc import ABCMeta, abstractmethod, abstractproperty
 import geojson
 import xarray as xr
@@ -170,9 +170,8 @@ class OpenDriftSimulation(PhysicsMethods, Timeable):
         self.seed_geojson = []
 
         # Dict to store readers
-        self.readers = OrderedDict(
-        )  # Dictionary, key=name, value=reader object
-        self.priority_list = OrderedDict()
+        self.readers = {}  # Dictionary, key=name, value=reader object
+        self.priority_list = {} #OrderedDict()
 
         # Make copies of dictionaries so that they are private to each instance
         self.status_categories = ['active']  # Particles are active by default
@@ -709,8 +708,8 @@ class OpenDriftSimulation(PhysicsMethods, Timeable):
     def add_metadata(self, key, value):
         """Add item to metadata dictionary, for export as netCDF global attributes"""
         if not hasattr(self, 'metadata_dict'):
-            from collections import OrderedDict
-            self.metadata_dict = OrderedDict()
+            #from collections import OrderedDict
+            self.metadata_dict = {}
         self.metadata_dict[key] = value
 
     def prepare_run(self):
@@ -2982,7 +2981,7 @@ class OpenDriftSimulation(PhysicsMethods, Timeable):
             del self.environment
             if hasattr(self, 'environment_profiles'):
                 del self.environment_profiles
-            self.io_import_file(outfile)
+            #self.io_import_file(outfile)
 
         self.timer_end('cleaning up')
         self.timer_end('total time')

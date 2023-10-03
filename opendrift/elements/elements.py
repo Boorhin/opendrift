@@ -14,7 +14,7 @@
 #
 # Copyright 2015, Knut-Frode Dagestad, MET Norway
 
-from collections import OrderedDict
+#from collections import OrderedDict
 import numpy as np
 
 class LagrangianArray:
@@ -48,43 +48,47 @@ class LagrangianArray:
                 - z: vertical position of the particle in m, positive upwards (above sea surface)
     """
 
-    variables = OrderedDict([
-        ('ID', {'dtype': np.int32,  # Unique numerical identifier
+    variables = {
+        'ID': {'dtype': np.int32,  # Unique numerical identifier
                 'seed': False,
-                'default': -1}),  # ID to be assigned by application
-        ('status', {'dtype': np.int32,  # Status categories
+                'default': -1},  # ID to be assigned by application
+        'status': {'dtype': np.int32,  # Status categories
                     'seed': False,
-                    'default': 0}),
-        ('moving', {'dtype': np.int32,  # Set to 0 for elements which are frosen
+                    'default': 0},
+        'moving': {'dtype': np.int32,  # Set to 0 for elements which are frosen
                     'seed': False,
-                    'default': 1}),
-        ('age_seconds', {'dtype': np.float32,
+                    'default': 1},
+        'age_seconds': {'dtype': np.float32,
                          'units': 's',
                          'seed': False,
-                         'default': 0}),
-        ('origin_marker', {'dtype': np.int16,
+                         'default': 0},
+        'origin_marker': {'dtype': np.int16,
                            'unit': '',
-            'description': 'An integer kept constant during the simulation. Different values may be used for different seedings, to separate elements during analysis. With GUI, only a single seeding is possible.',
-                           'default': 0}),
-        ('lon', {'dtype': np.float32,
+                           'description': '''An integer kept constant during the simulation. 
+                             Different values may be used for different seedings, 
+                             to separate elements during analysis. 
+                             With GUI, only a single seeding is possible.''',
+                           'default': 0},
+        'lon': {'dtype': np.float32,
                  'units': 'degrees_east',
                  'standard_name': 'longitude',
                  'long_name': 'longitude',
                  'seed': False,
-                 'axis': 'X'}),
-        ('lat', {'dtype': np.float32,
+                 'axis': 'X'},
+        'lat': {'dtype': np.float32,
                  'units': 'degrees_north',
                  'standard_name': 'latitude',
                  'long_name': 'latitude',
                  'seed': False,
-                 'axis': 'Y'}),
-        ('z', {'dtype': np.float32,
+                 'axis': 'Y'},
+        'z': {'dtype': np.float32,
                    'units': 'm',
                    'standard_name': 'z',
                    'long_name': 'vertical position',
                    'axis': 'Z',
                    'positive': 'up',
-                   'default': 0})])
+                   'default': 0}
+        }
 
     def __init__(self, **kwargs):
         """Initialises a LagrangianArray with given properties.

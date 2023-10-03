@@ -1,4 +1,4 @@
-from collections import OrderedDict
+#from collections import OrderedDict
 from datetime import datetime, timedelta
 
 class Timeable:
@@ -12,14 +12,14 @@ class Timeable:
     @property
     def timers(self):
         if self.__timers__ is None:
-            self.__timers__ = OrderedDict()
+            self.__timers__ = {} #OrderedDict()
 
         return self.__timers__
 
     @property
     def timing(self):
         if self.__timing__ is None:
-            self.__timing__ = OrderedDict()
+            self.__timing__ = {} #OrderedDict()
 
         return self.__timing__
 
