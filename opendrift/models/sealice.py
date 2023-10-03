@@ -83,6 +83,7 @@ class SeaLice(OceanDrift):
     required_variables = {
         'x_sea_water_velocity': {'fallback': 0},
         'y_sea_water_velocity': {'fallback': 0},
+        'upward_sea_water_velocity': {'fallback': 0},
         # 'sea_surface_wave_significant_height': {'fallback': 0},
         # 'x_wind': {'fallback': 0},
         # 'y_wind': {'fallback': 0},
@@ -166,13 +167,11 @@ class SeaLice(OceanDrift):
         logger.info("preparing the run...")
         ### need to find a better way of initialising the variables...
         self.prefix="lice:"
-        self.vertical_migration_speed=self.get_config(self.prefix+'vertical_migration_speed') \
-                                        *self.time_step.total_seconds()
+        self.vertical_migration_speed=self.get_config(self.prefix+'vertical_migration_speed') 
         self.sensing_distance=2*self.vertical_migration_speed
         self.tau= np.pi+2*np.deg2rad(self.get_config(self.prefix+'twilight')) #width of solar irridation distribution
         self.nu=self.get_config(self.prefix+'nu')
-        self.sinking_velocity=self.get_config(self.prefix+'sinking_velocity') \
-                                *self.time_step.total_seconds()
+        self.sinking_velocity=self.get_config(self.prefix+'sinking_velocity')*-1
         self.freezing_salinity=self.get_config(self.prefix+'freezing_salinity')
         self.avoided_salinity=self.get_config(self.prefix+'avoided_salinity')
         self.k_water=self.get_config(self.prefix+'k_water')
@@ -229,14 +228,14 @@ class SeaLice(OceanDrift):
         logger.debug("Building global population model")
         death_rate=self.get_config(self.prefix+'death_rate')* self.time_step.total_seconds()
         maturation_rate=self.get_config(self.prefix+'maturation_rate')* self.time_step.total_seconds()
-        duration = self.get_config('general:duration')/ self.time_step.total_seconds()
+        duration = self.expected_steps_calculation #self.get_config('general:duration')/ self.time_step.total_seconds()
         Mat = int(np.ceil(self.get_config(self.prefix+'maturity_date')*24*3600/ \
                     self.time_step.total_seconds())) # maturity age in timestep
-        t=np.arange(0,duration+1,dtype=np.int)
+        t=np.arange(0,duration+1,dtype='int')
         self.juv=np.exp(-1*death_rate*t)
-        self.juv[0]=1
+        # self.juv[0]=1
         self.dead=1-self.juv
-        self.adult=np.zeros_like(t, dtype=np.float)
+        self.adult=np.zeros_like(t, dtype='float')
         if Mat<duration:
             decayjuv=self.juv[Mat]*np.exp(-1*(maturation_rate+death_rate)*(t[t>=Mat]-Mat))
             self.juv[t>=Mat] =decayjuv
@@ -331,7 +330,8 @@ class SeaLice(OceanDrift):
         """
         The natural range of the larvae is 0-50m
         """
-        self.elements.z[self.elements.z>0]=0
+        #self.elements.z[self.elements.z>=0]=0.0000001 #compensating for weird z=0 special case
+        logger.debug(f'{(self.elements.z<-50).sum()} elements lifted from -50m')
         self.elements.z[self.elements.z<-50]=-50
 
     def Lice_vertical_migration(self):
@@ -340,7 +340,7 @@ class SeaLice(OceanDrift):
         and temperature triggers.
         """
         ### all lice sink at the same speed
-        self.elements.z -= self.sinking_velocity
+        self.elements.terminal_velocityz = self.sinking_velocity
 
         ### filter actively avoiding salt
         # Frozen=self.environment.sea_water_salinity<self.freezing_salinity
@@ -376,14 +376,91 @@ class SeaLice(OceanDrift):
         going_down=np.logical_or(Avoiding,down_temp_mig)
         going_up=np.logical_or(np.logical_or(light_mig_N,light_mig_C),up_temp_mig)
         logger.debug("{} going down, {} going up".format(going_down.sum(), going_up.sum()))
-        self.elements.z[going_down] -= self.vertical_migration_speed
-        self.elements.z[going_up] +=   self.vertical_migration_speed
+        self.elements.terminal_velocity[going_down] -= self.vertical_migration_speed
+        self.elements.terminal_velocity[going_up] +=   self.vertical_migration_speed
 
+    def vertical_mixing(self, store_depths=False):
+        """Mix particles vertically according to eddy diffusivity and buoyancy
 
+            Buoyancy is expressed as terminal velocity, which is the
+            steady-state vertical velocity due to positive or negative
+            buoyant behaviour. It is usually a function of particle density,
+            diameter, and shape.
+
+            Vertical particle displacemend du to turbulent mixing is
+            calculated using a random walk scheme" (Visser et al. 1996)
+        """
+        self.timer_start('main loop:updating elements:vertical mixing')
+
+        dt_mix = self.get_config('vertical_mixing:timestep')
+        ntimes_mix = np.abs(int(self.time_step.total_seconds()/dt_mix))
+        Kz=self.fallback_values['ocean_vertical_diffusivity']
+        Zmin = -1.*self.environment.sea_floor_depth_below_sea_level
+        logger.debug('Using constant diffusivity specified by fallback_values[''ocean_vertical_diffusivity''] = %s m2.s-1' % (self.fallback_values['ocean_vertical_diffusivity']))
+        for i in range(0, ntimes_mix):
+            w = self.elements.terminal_velocity
+
+            # Visser et al. 1997 random walk mixing
+            # requires an inner loop time step dt such that
+            # dt << (d2K/dz2)^-1, e.g. typically dt << 15min
+            #
+            # NB: In the last term Kz is evaluated in zi, while
+            # it should be evaluated in (self.elements.z - dKdz*dt_mix)
+            # This is not expected have large impact on the result
+            R = 2*np.random.random(self.num_elements_active()) - 1
+            r = 1.0/3
+            # New position  =  old position   - up_K_flux   + random walk
+            self.elements.z = self.elements.z - self.elements.moving*(
+                R*np.sqrt((Kz*dt_mix*2/r)))
+
+            # Reflect from surface
+            reflect = np.where(self.elements.z >= 0)
+            if len(reflect[0]) > 0:
+                self.elements.z[reflect] = -self.elements.z[reflect]
+
+            # Reflect elements going below seafloor
+            bottom = np.where(np.logical_and(self.elements.z < Zmin, self.elements.moving == 1))
+            if len(bottom[0]) > 0:
+                logger.debug('%s elements penetrated seafloor, lifting up' % len(bottom[0]))
+                self.elements.z[bottom] = 2*Zmin[bottom] - self.elements.z[bottom]
+
+            # Advect due to buoyancy
+            self.elements.z = self.elements.z + w*dt_mix*self.elements.moving
+
+            # Put the particles that belonged to the surface slick
+            # (if present) back to the surface
+            #self.elements.z[surface] = 0.
+
+            # Formation of slick and wave mixing for surfaced particles
+            # if implemented for this class
+            #self.surface_stick()
+            #self.surface_wave_mixing(dt_mix)
+
+            # Let particles stick to bottom
+            bottom = np.where(self.elements.z < Zmin)
+            if len(bottom[0]) > 0:
+                logger.debug('%s elements reached seafloor, set to bottom' % len(bottom[0]))
+                self.interact_with_seafloor()
+                self.bottom_interaction(Zmin)
+
+            if store_depths is not False:
+                depths[i, :] = self.elements.z
+
+        self.timer_end('main loop:updating elements:vertical mixing')   
+        
+        
     def update(self):
         self.SI_pop()
-        self.degree_days()
+        #self.degree_days()
         self.advect_ocean_current()        
-        self.vertical_mixing()
         self.Lice_vertical_migration()
+        
+        # Turbulent Mixing
+        if self.get_config('drift:vertical_mixing') is True:
+            #self.update_terminal_velocity()
+            self.vertical_mixing()
+        else:
+            self.vertical_buoyancy()
         self.depth_test()
+        # Vertical advection
+        self.vertical_advection()
