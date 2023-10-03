@@ -1,4 +1,0 @@
-"""
-Description of models.
-"""
-
