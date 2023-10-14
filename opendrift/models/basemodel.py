@@ -618,7 +618,7 @@ class OpenDriftSimulation(PhysicsMethods, Timeable):
         if not hasattr(self, '_config'):
             self._config = {}
         remove = []
-        for c, i in config.items():  # Check that provided config is conistent
+        for c, i in config.items():  # Check that provided config is consistent
             if c in self._config:
                 if overwrite is False:
                     logger.debug(
@@ -724,14 +724,14 @@ class OpenDriftSimulation(PhysicsMethods, Timeable):
                 self.previous_lon = np.ma.masked_all(self.num_elements_total())
                 self.previous_lat = np.ma.masked_all(self.num_elements_total())
             if IDs is None:
-                IDs = self.elements.ID
+                IDs = self.elements.ID.astype('int')
                 lons = self.elements.lon
                 lats = self.elements.lat
                 self.newly_seeded_IDs = None
             else:
                 # to check if seeded on land
                 if len(IDs) > 0:
-                    self.newly_seeded_IDs = np.copy(IDs)
+                    self.newly_seeded_IDs = np.copy(IDs).astype('int')
                 else:
                     self.newly_seeded_IDs = None
             self.previous_lon[IDs - 1] = np.copy(lons)
@@ -3024,12 +3024,12 @@ class OpenDriftSimulation(PhysicsMethods, Timeable):
         else:
             self.steps_output = int(np.floor(steps_calculation_float))
 
-        ID_ind = self.elements.ID - 1
+        ID_ind = self.elements.ID.astype('int') - 1
         time_ind = self.steps_output - 1 - self.steps_exported
 
         if steps_calculation_float.is_integer() or self.time_step < timedelta(
                 seconds=1):
-            element_ind = range(len(ID_ind))  # We write all elements
+            element_ind = np.arange(len(ID_ind))  # We write all elements
         else:
             deactivated = np.where(self.elements.status != 0)[0]
             if len(deactivated) == 0:
@@ -3051,8 +3051,10 @@ class OpenDriftSimulation(PhysicsMethods, Timeable):
             # from 0 to num_elements_active()
             # Does not hold when importing ID from a saved file, where
             # some elements have been deactivated
+            #print(var, ID_ind,time_ind,element_ind)
             self.history[var][ID_ind, time_ind] = \
                 getattr(self.elements, var)[element_ind]
+            #print(var, getattr(self.elements, var)[element_ind])
             if len(ID_ind) > 0:
                 newmin = np.min(self.history[var][ID_ind, time_ind])
                 newmax = np.max(self.history[var][ID_ind, time_ind])

@@ -90,7 +90,7 @@ class Reader(BaseReader, UnstructuredReader):
     ocean_depth_nele = None
     ocean_depth_node = None
 
-    def __init__(self, filename=None, name=None, proj4=None, engine="netcdf4"):
+    def __init__(self, filename=None, name=None, proj4=None, engine="netcdf4", standard_name_mapping={}):
 ### if variable and dimension similar name, xarray crashes
 
         if filename is None:

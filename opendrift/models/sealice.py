@@ -17,59 +17,85 @@
 from datetime import timedelta, datetime
 import numpy as np
 import logging; logger = logging.getLogger(__name__)
-from opendrift.models.oceandrift import Lagrangian3DArray, OceanDrift
+#from opendrift.models.oceandrift import Lagrangian3DArray, OceanDrift
+from opendrift.models.basemodel import OpenDriftSimulation
+from opendrift.elements import LagrangianArray
 from opendrift.models.physics_methods import hour_angle, solar_elevation
 
-class SeaLiceElement(Lagrangian3DArray):
+class SeaLiceElement(LagrangianArray):
     """
     Extending Lagrangian3DArray with specific properties for larval and
     juvenile stages of sea lice into super individuals
     """
 
-    variables = Lagrangian3DArray.add_variables([
-        ('LicePerFish',{'dtype':np.float32,
+    variables = LagrangianArray.add_variables([
+        ('terminal_velocity', {'dtype': 'float',
+                               'units': 'm/s',
+                               'description': 'Terminal rise/sinking velocity (buoyancy) '
+                               'in the ocean column',
+                               'default': 0.}),
+        ('current_drift_factor', {'dtype': 'float',
+                                  'units': '1',
+                                  'description': 'Elements are moved with this fraction of the '
+                                  'current vector, in addition to currents '
+                                  'and Stokes drift',
+                                  'default': 1.}),                       
+        ('LicePerFish',{'dtype':'float',
                         'units':'',
+                        'description': '''Average number of lice attached to fishes''', 
                         'default':0.5}),
-        ('AvFishW8',{'dtype':np.float32,
+        ('AvFishW8',{'dtype':'float',
                     'units':'kg',
+                    'description': '''Average weight of fishes''',
                     'default':4.5}),
-        ('particle_biomass',{'dtype': np.float32,
+        ('particle_biomass',{'dtype': 'float',
                             'units': 'kg',
+                            'description': '''Fraction of farm biomass represented by particles''',
                             'default': 1000.}),
-        ('hatched',{'dtype': np.float32,
+        ('hatched',{'dtype': 'float',
                             'units': '',
+                            'description': '''Number of hatched nauplii in the superindividuals at spawn''', # this could be optimised
                             'default': 0.}),
-        ('nauplii', {'dtype': np.float32,
+        ('nauplii', {'dtype': 'float',
                             'units': '',
+                            'description': '''Number of nauplii in the superindividual''',
                             'default': 0.}),
-        ('copepodid', {'dtype': np.float32,
+        ('copepodid', {'dtype': 'float',
                      'units': '',
+                     'description': '''Number of copepodid in the superindividual''',
                      'default': 0.}),
-        ('dead',  {'dtype': np.float32,
+        ('dead',  {'dtype': 'float',
                      'units': '',
+                     'description': '''Number of dead lice in the superindividual''',
                      'default': 0.}),
-        ('eliminated',{'dtype': np.int8,
+        #('eliminated',{'dtype': 'int',
+        #             'units': '',
+        #             'description': '''Status of the particle when less than 1 individual''', # this should be optimised to bool or desactivated all together
+        #             'default': 0}),
+        ('degree_days', {'dtype': 'float',
                      'units': '',
-                     'default': 0}),
-        ('degree_days', {'dtype': np.float32,
+                     'description': '''aging measure of superindividual (experimental)''',
+                    'default': 0.}), #range 40-170
+        ('safe_salinity_above', {'dtype': 'bool',
                      'units': '',
-                    'default': 0}), #range 40-170
-        ('safe_salinity_above', {'dtype': np.int8,
+                     'description': '''Check if salinity allows vertical upward migration''', 
+                    'default': False}),
+        ('temperature_above', {'dtype': 'float',
                      'units': '',
-                    'default': 0}),
-        ('temperature_above', {'dtype': np.float32,
+                     'description': '''Temperature above the particles (depends of migration speed)''', 
+                    'default': 10.}),
+        ('temperature_below', {'dtype': 'float',
                      'units': '',
-                    'default': 10}),
-        ('temperature_below', {'dtype': np.float32,
-                     'units': '',
-                    'default': 10}),
-        ('light', {'dtype': np.float32,
+                     'description': '''Temperature below the particles (depends of migration speed)''', 
+                    'default': 10.}),
+        ('light', {'dtype': 'float',
                      'units': 'µmol photon s−1 m−2',
+                     'description': '''Quantity of light received by the particles''', 
                      'default': 0.}),
                       ])
 
 
-class SeaLice(OceanDrift):
+class SeaLice(OpenDriftSimulation):
     """
     Particle trajectory model based on the OpenDrift framework.
     Developed by Julien Moreau (Plastics@Bay CIC)
@@ -107,8 +133,17 @@ class SeaLice(OceanDrift):
         self._add_config({
             'general:duration':{'type':'float', 'default':0.,
                                 'min': None, 'max': None, 'units': 'seconds',
-                                'description': 'Experiment time in seconds',
+                                'description': 'Numerical experiment time in seconds',
                                 'level': self.CONFIG_LEVEL_ESSENTIAL},
+            'drift:vertical_advection': {'type': 'bool', 'default': True, 
+                                'description':'Advect elements with vertical component of ocean current.',
+                                'level': self.CONFIG_LEVEL_BASIC},
+            'drift:vertical_mixing': {'type': 'bool', 'default': True, 
+                                'level': self.CONFIG_LEVEL_BASIC,
+                                'description': 'Activate vertical mixing scheme with inner loop'},
+            'vertical_mixing:timestep': {'type': 'float', 'min': 0.1, 'max': 3600, 'default': 60,
+                                'level': self.CONFIG_LEVEL_ADVANCED, 'units': 'seconds',
+                                 'description':'Time step used for inner loop of vertical mixing.'},                    
             'lice:seeding_time_step':{'type':'float', 'default':None,
                                 'min': None, 'max': None, 'units': 'seconds',
                                 'description': 'Time between particle release',
@@ -161,6 +196,9 @@ class SeaLice(OceanDrift):
                                 'min': 0., 'max': 90., 'units': 'degrees',
                                 'description': 'angle below the horizon for twilight',
                                 'level': self.CONFIG_LEVEL_ADVANCED},
+            'lice:sense_down':{'type':'bool', 'default':False,                                
+                                'description': 'allow searching for warmer temp below (unlikely)',
+                                'level': self.CONFIG_LEVEL_ADVANCED},                    
             })
 
     def prepare_run(self):
@@ -264,9 +302,9 @@ class SeaLice(OceanDrift):
                                     self.dead[time_in_step]
         # desactivate dead particles
         ## this test is not good for seeds with few lice
-        Dying=self.elements.nauplii+ self.elements.copepodid<1
-        self.elements.eliminated[Dying]=1
-        self.deactivate_elements(self.elements.eliminated.astype(np.bool), reason="All dead")
+        Dying=(self.elements.nauplii+ self.elements.copepodid)<1
+        #self.elements.eliminated[Dying]=1
+        self.deactivate_elements(Dying, reason="All individuals dead")
 
 
     def sensing(self):
@@ -278,12 +316,33 @@ class SeaLice(OceanDrift):
         logger.debug("sensing temperature and salinity")
         Backup= np.copy(self.elements.z[:])
         self.elements.z +=self.sensing_distance
+        
+        flying= self.elements.z>0
+        nb_flying= flying.sum()
+        if nb_flying>0:
+            logger.debug(f"{nb_flying} elements sniffing the air, nose down")
+            backup_flying=np.copy(self.elements.z[flying])
+            self.elements.z[flying]=0
+            
         self.elements.safe_salinity_above[self.environment.sea_water_salinity> \
-                                            self.avoided_salinity]=1
+                                            self.avoided_salinity]=True
+        # print('safe sal ....', self.elements.safe_salinity_above)
         self.elements.temperature_above= self.environment.sea_water_temperature
-        self.elements.z -= 2*self.sensing_distance
-        self.elements.temperature_below= self.environment.sea_water_temperature
-        self.elements.z = Backup
+        if nb_flying>0:
+            self.elements.z[flying]=backup_flying
+                    
+        if self.get_config('lice:sense_down'):
+            self.elements.z -= 2*self.sensing_distance
+            Zmin=-1.*self.environment.sea_floor_depth_below_sea_level
+            digging=self.elements.z<Zmin
+            nb_digging=digging.sum()
+            if nb_digging>0:
+                logger.debug(f"{nb_digging} elements sniffing the ground, nose up")
+                self.elements.z[digging]=Zmin
+            self.elements.temperature_below= self.environment.sea_water_temperature
+            self.elements.z = Backup
+        else:
+             self.elements.z -= self.sensing_distance
 
     def degree_days(self):
         """
@@ -302,7 +361,7 @@ class SeaLice(OceanDrift):
     #     self.ref_date=self.time.date.replace(hour=0,minute=0,second=0)
     #     Av_lon= np.mean(self.elements.lon)
     #     Av_lat= np.mean(self.elements.lat)
-    #     minutes=np.arange(0,60*24, dtype=np.float32)
+    #     minutes=np.arange(0,60*24, dtype='float')
     #     angles = np.empty_like(minutes)
     #     for i in range(len(minutes)):
     #         angles[i]=hour_angle(self.ref_date+timedelta(minutes=float(minutes[i])),Av_lon)
@@ -331,8 +390,11 @@ class SeaLice(OceanDrift):
         The natural range of the larvae is 0-50m
         """
         #self.elements.z[self.elements.z>=0]=0.0000001 #compensating for weird z=0 special case
-        logger.debug(f'{(self.elements.z<-50).sum()} elements lifted from -50m')
-        self.elements.z[self.elements.z<-50]=-50
+        deepers=self.elements.z<-50
+        nb_deepers=deepers.sum()
+        if nb_deepers>0:
+            logger.debug(f'{(self.elements.z<-50).sum()} elements lifted from -50m')
+            self.elements.z[deepers]=-50
 
     def Lice_vertical_migration(self):
         """
@@ -340,7 +402,7 @@ class SeaLice(OceanDrift):
         and temperature triggers.
         """
         ### all lice sink at the same speed
-        self.elements.terminal_velocityz = self.sinking_velocity
+        #self.elements.terminal_velocityz = self.sinking_velocity
 
         ### filter actively avoiding salt
         # Frozen=self.environment.sea_water_salinity<self.freezing_salinity
@@ -356,7 +418,7 @@ class SeaLice(OceanDrift):
         ### identify the elements involved in the different scenarios
         Filter_N= self.elements.copepodid < self.elements.nauplii
         Filter_C=~Filter_N
-        safe_up_salt=Normal_salt&self.elements.safe_salinity_above.astype(np.bool)
+        safe_up_salt=Normal_salt&self.elements.safe_salinity_above
         #### need to be able to deal with false arrays of Filter_N and C...
         ### They generate empty arrays
         light_mig_N= safe_up_salt&Filter_N&(self.elements.light \
@@ -368,16 +430,22 @@ class SeaLice(OceanDrift):
         up_temp_mig= safe_up_salt&~light_mig_N&~light_mig_C& \
                     (self.elements.temperature_above \
                     > self.environment.sea_water_temperature)
-        down_temp_mig=Normal_salt&~up_temp_mig&~light_mig_N& ~light_mig_C& \
-                        (self.elements.temperature_below> \
+        
+        if self.get_config('lice:sense_down'):
+            # conditions to swim down for temperature
+            down_temp_mig=Normal_salt&~up_temp_mig&~light_mig_N& ~light_mig_C
+            down_temp_mig =np.logical_and(down_temp_mig, self.elements.temperature_below> \
                         self.environment.sea_water_temperature)
-
-        ### Active migration
-        going_down=np.logical_or(Avoiding,down_temp_mig)
+            going_down=np.logical_or(Avoiding,down_temp_mig)
+        else:
+            going_down=Avoiding
+        
+        ### Active migration        
         going_up=np.logical_or(np.logical_or(light_mig_N,light_mig_C),up_temp_mig)
         logger.debug("{} going down, {} going up".format(going_down.sum(), going_up.sum()))
-        self.elements.terminal_velocity[going_down] -= self.vertical_migration_speed
-        self.elements.terminal_velocity[going_up] +=   self.vertical_migration_speed
+        self.elements.terminal_velocity=self.elements.moving*self.sinking_velocity
+        self.elements.terminal_velocity[going_down] -=  self.vertical_migration_speed
+        self.elements.terminal_velocity[going_up]   +=   self.vertical_migration_speed
         
 
     def vertical_motion(self, store_depths=False):
@@ -408,10 +476,10 @@ class SeaLice(OceanDrift):
         for i in range(0, ntimes_mix):           
             # New position  =  old position   + dz turbulence   + dz terminal velocity and advection (optional)
            
-            self.elements.z = self.elements.z +
-                              self.elements.moving*(
-                                   np.sqrt(2*Kz)*np.random.normal (0, dt_mix**.5, (self.num_elements_active()))
-                                   + w*dt_mix
+            self.elements.z = self.elements.z + \
+                              self.elements.moving*( \
+                                   np.sqrt(2*Kz)*np.random.normal (0, dt_mix**.5, (self.num_elements_active())) \
+                                   + w*dt_mix \
                               )
                 
             # Reflect from surface
@@ -432,9 +500,9 @@ class SeaLice(OceanDrift):
                 nb_pingpong=pingpong.sum()
                 if nb_pingpong >0:
                     # there needs a configuration option to decide what to do in case of ping pong
-                    # For the lice the surface is ok as constant K
-                    logger.debug('%s elements penetrated seafloor, than breached water => at the surface' % nb_pingpong)
-                    self.elements.z[pingpong] =0
+                    # For the lice the surface is ok as constant K but seabed could also be a solution or right in the middle
+                    logger.debug('%s elements penetrated seafloor then breached surface => in the middle' % nb_pingpong)
+                    self.elements.z[pingpong] =Zmin[pingpong]/2
 
         self.timer_end('main loop:updating elements:vertical motion')   
     
@@ -447,7 +515,6 @@ class SeaLice(OceanDrift):
                 
         # Turbulent Mixing
         if self.get_config('drift:vertical_mixing') is True:
-            #self.update_terminal_velocity()
             self.vertical_motion()
         else:
             # to be implemented

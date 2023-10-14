@@ -49,45 +49,45 @@ class LagrangianArray:
     """
 
     variables = {
-        'ID': {'dtype': np.int32,  # Unique numerical identifier
+        'ID': {'dtype': 'int',  # Unique numerical identifier
                 'seed': False,
                 'default': -1},  # ID to be assigned by application
-        'status': {'dtype': np.int32,  # Status categories
+        'status': {'dtype': 'int',  # Status categories
                     'seed': False,
                     'default': 0},
-        'moving': {'dtype': np.int32,  # Set to 0 for elements which are frosen
+        'moving': {'dtype': 'int',  # Set to 0 for elements which are frosen
                     'seed': False,
                     'default': 1},
-        'age_seconds': {'dtype': np.float32,
+        'age_seconds': {'dtype': 'float',
                          'units': 's',
                          'seed': False,
-                         'default': 0},
-        'origin_marker': {'dtype': np.int16,
+                         'default': 0.},
+        'origin_marker': {'dtype': 'int',
                            'unit': '',
                            'description': '''An integer kept constant during the simulation. 
                              Different values may be used for different seedings, 
                              to separate elements during analysis. 
                              With GUI, only a single seeding is possible.''',
                            'default': 0},
-        'lon': {'dtype': np.float32,
+        'lon': {'dtype': 'float',
                  'units': 'degrees_east',
                  'standard_name': 'longitude',
                  'long_name': 'longitude',
                  'seed': False,
                  'axis': 'X'},
-        'lat': {'dtype': np.float32,
+        'lat': {'dtype': 'float',
                  'units': 'degrees_north',
                  'standard_name': 'latitude',
                  'long_name': 'latitude',
                  'seed': False,
                  'axis': 'Y'},
-        'z': {'dtype': np.float32,
+        'z': {'dtype': 'float',
                    'units': 'm',
                    'standard_name': 'z',
                    'long_name': 'vertical position',
                    'axis': 'Z',
                    'positive': 'up',
-                   'default': 0}
+                   'default': 0.}
         }
 
     def __init__(self, **kwargs):
@@ -103,10 +103,17 @@ class LagrangianArray:
         """
 
         # Collect default values in separate dict, for easier access
-        default_values = {variable: self.variables[variable]['dtype'](
-                          self.variables[variable]['default'])
-                          for variable in self.variables
-                          if 'default' in self.variables[variable]}
+        #### THIS IS BUGGY THE TEST SHOULD BE DONE UPSTREAM INSTEAD OF CHANGING THE DTYPE OF THE DEFAULT VALUE
+        #### WHY WOULD THIS BE BETTER ACCESS ????
+        #### Had to use eval but that's modern python 3.10+
+        
+        default_values = {}
+        for variable in self.variables:
+             if 'default' in self.variables[variable]:
+                 if isinstance(self.variables[variable]['default'], eval(self.variables[variable]['dtype'])):
+                      default_values[variable]=self.variables[variable]['default']
+                 else:
+                      raise TypeError(f"Default value {self.variables[variable]['default']} of variable {variable} is incompatible with type {self.variables[variable]['dtype']}")
 
         if len(kwargs) == 0:
             # Initialise an empty object (all variables have length 0)
@@ -140,18 +147,26 @@ class LagrangianArray:
 
         # Store input arrays
         for default_variable in default_values.keys():  # set default values
-            setattr(self, default_variable, default_values[default_variable])
+            #print('default: ...',default_variable,default_values[default_variable])
+            
+            setattr(self, default_variable, eval(self.variables[default_variable]['dtype'])(default_values[default_variable]))
         for input_variable in kwargs.keys():  # override with input values
-            setattr(self, input_variable, self.variables[input_variable]
-                    ['dtype'](kwargs[input_variable]))
+            #print('input: ...',input_variable,kwargs[input_variable])
+            if type(kwargs[input_variable])==list:
+               kwargs[input_variable]=np.array(kwargs[input_variable],dtype=self.variables[input_variable]['dtype'])
+            #else:
+            #   print(input_variable, type(kwargs[input_variable]))
+               
+            setattr(self, input_variable, kwargs[input_variable]) #dtype is checked upstream why repeating?
 
         # Store dtypes for all parameters in a common dtype object (for io)
-        self.dtype = np.dtype([(var[0], var[1]['dtype'])
-                               for var in self.variables.items()])
+        
+        self.dtype = np.dtype([(var, self.variables[var]['dtype']) for var in self.variables.keys()])
+        
 
         # Status must always be array
         if not type(self.status) == np.ndarray:
-            self.status = self.status*np.ones(self.lon.shape)
+            self.status = self.status*np.ones(len(self.lon))
 
     @classmethod
     def add_variables(cls, new_variables):
@@ -167,20 +182,19 @@ class LagrangianArray:
         for var in self.variables:
             present_data = getattr(self, var)
             new_data = getattr(other, var)
-
             # If both arrays have an identical scalar, it remains a scalar
             if (not isinstance(new_data, np.ndarray) and
                 not isinstance(present_data, np.ndarray) and
                 present_data == new_data):
                 continue
 
-            else:  # Otherwise we create arrays and concatenate
+            else:  # Otherwise we create arrays and concatenate               
                 if not hasattr(present_data, '__len__'):
-                    present_data = present_data*np.ones(len_self)
+                    present_data = (present_data*np.ones(len_self)).astype(self.dtype[var])
                 if not hasattr(new_data, '__len__'):
-                    new_data = new_data*np.ones(len_other)
-                setattr(self, var, np.concatenate((present_data,
-                                                   new_data)))
+                    new_data = (new_data*np.ones(len_other)).astype(self.dtype[var])
+
+                setattr(self, var, np.concatenate((present_data,new_data)))
 
     def move_elements(self, other, indices):
         """Remove elements with given indices, and append to another object.
@@ -205,9 +219,9 @@ class LagrangianArray:
             self_var = np.atleast_1d(self_var)
             other_var = np.atleast_1d(other_var)
             if len(self_var) < self_len:  # Convert scalar to array
-                self_var = self_var*np.ones(self_len)
+                self_var = self_var*np.ones(self_len, dtype=self.dtype[var])
             if len(other_var) < other_len:  # Convert scalar to aray
-                other_var = other_var*np.ones(other_len)
+                other_var = other_var*np.ones(other_len, dtype=self.dtype[var])
             if len(self_var) > 0:
                 setattr(other, var, np.concatenate((other_var,
                                                     self_var[indices])))
