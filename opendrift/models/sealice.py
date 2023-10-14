@@ -378,8 +378,9 @@ class SeaLice(OceanDrift):
         logger.debug("{} going down, {} going up".format(going_down.sum(), going_up.sum()))
         self.elements.terminal_velocity[going_down] -= self.vertical_migration_speed
         self.elements.terminal_velocity[going_up] +=   self.vertical_migration_speed
+        
 
-    def vertical_mixing(self, store_depths=False):
+    def vertical_motion(self, store_depths=False):
         """Mix particles vertically according to eddy diffusivity and buoyancy
 
             Buoyancy is expressed as terminal velocity, which is the
@@ -390,77 +391,66 @@ class SeaLice(OceanDrift):
             Vertical particle displacemend du to turbulent mixing is
             calculated using a random walk scheme" (Visser et al. 1996)
         """
-        self.timer_start('main loop:updating elements:vertical mixing')
-
+        self.timer_start('main loop:updating elements:vertical motion')
+        
+        w = self.elements.terminal_velocity
+        #vertical advection component
+        if self.get_config('drift:vertical_advection'):
+            w+=self.environment.upward_sea_water_velocity
+        else:
+            logger.debug('Vertical advection deactivated')
+                   
         dt_mix = self.get_config('vertical_mixing:timestep')
         ntimes_mix = np.abs(int(self.time_step.total_seconds()/dt_mix))
         Kz=self.fallback_values['ocean_vertical_diffusivity']
         Zmin = -1.*self.environment.sea_floor_depth_below_sea_level
         logger.debug('Using constant diffusivity specified by fallback_values[''ocean_vertical_diffusivity''] = %s m2.s-1' % (self.fallback_values['ocean_vertical_diffusivity']))
-        for i in range(0, ntimes_mix):
-            w = self.elements.terminal_velocity
-
-            # Visser et al. 1997 random walk mixing
-            # requires an inner loop time step dt such that
-            # dt << (d2K/dz2)^-1, e.g. typically dt << 15min
-            #
-            # NB: In the last term Kz is evaluated in zi, while
-            # it should be evaluated in (self.elements.z - dKdz*dt_mix)
-            # This is not expected have large impact on the result
-            R = 2*np.random.random(self.num_elements_active()) - 1
-            r = 1.0/3
-            # New position  =  old position   - up_K_flux   + random walk
-            self.elements.z = self.elements.z - self.elements.moving*(
-                R*np.sqrt((Kz*dt_mix*2/r)))
-
+        for i in range(0, ntimes_mix):           
+            # New position  =  old position   + dz turbulence   + dz terminal velocity and advection (optional)
+           
+            self.elements.z = self.elements.z +
+                              self.elements.moving*(
+                                   np.sqrt(2*Kz)*np.random.normal (0, dt_mix**.5, (self.num_elements_active()))
+                                   + w*dt_mix
+                              )
+                
             # Reflect from surface
-            reflect = np.where(self.elements.z >= 0)
-            if len(reflect[0]) > 0:
+            reflect = self.elements.z > 0
+            if reflect.sum() > 0:
                 self.elements.z[reflect] = -self.elements.z[reflect]
 
             # Reflect elements going below seafloor
-            bottom = np.where(np.logical_and(self.elements.z < Zmin, self.elements.moving == 1))
-            if len(bottom[0]) > 0:
-                logger.debug('%s elements penetrated seafloor, lifting up' % len(bottom[0]))
+            #bottom = np.where(np.logical_and(self.elements.z < Zmin, self.elements.moving == 1))
+            bottom=self.elements.z< Zmin
+            nb_bottom=bottom.sum()
+            if nb_bottom > 0:
+                logger.debug('%s elements penetrated seafloor, lifting up' % nb_bottom)
                 self.elements.z[bottom] = 2*Zmin[bottom] - self.elements.z[bottom]
+                # need a special case when very shallow as particles can ping-pong
+                # will put it at the sea surface
+                pingpong=self.elements.z[bottom]>0
+                nb_pingpong=pingpong.sum()
+                if nb_pingpong >0:
+                    # there needs a configuration option to decide what to do in case of ping pong
+                    # For the lice the surface is ok as constant K
+                    logger.debug('%s elements penetrated seafloor, than breached water => at the surface' % nb_pingpong)
+                    self.elements.z[pingpong] =0
 
-            # Advect due to buoyancy
-            self.elements.z = self.elements.z + w*dt_mix*self.elements.moving
-
-            # Put the particles that belonged to the surface slick
-            # (if present) back to the surface
-            #self.elements.z[surface] = 0.
-
-            # Formation of slick and wave mixing for surfaced particles
-            # if implemented for this class
-            #self.surface_stick()
-            #self.surface_wave_mixing(dt_mix)
-
-            # Let particles stick to bottom
-            bottom = np.where(self.elements.z < Zmin)
-            if len(bottom[0]) > 0:
-                logger.debug('%s elements reached seafloor, set to bottom' % len(bottom[0]))
-                self.interact_with_seafloor()
-                self.bottom_interaction(Zmin)
-
-            if store_depths is not False:
-                depths[i, :] = self.elements.z
-
-        self.timer_end('main loop:updating elements:vertical mixing')   
-        
+        self.timer_end('main loop:updating elements:vertical motion')   
+    
         
     def update(self):
         self.SI_pop()
         #self.degree_days()
         self.advect_ocean_current()        
         self.Lice_vertical_migration()
-        
+                
         # Turbulent Mixing
         if self.get_config('drift:vertical_mixing') is True:
             #self.update_terminal_velocity()
-            self.vertical_mixing()
+            self.vertical_motion()
         else:
+            # to be implemented
             self.vertical_buoyancy()
         self.depth_test()
-        # Vertical advection
-        self.vertical_advection()
+        
